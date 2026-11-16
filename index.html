@@ -217,6 +217,7 @@ table.tbl{width:100%;border-collapse:collapse;background:var(--card);font-size:1
     </tbody>
   </table></div>
   <p>传输层只有两种：<b>stdio</b>（server 当子进程拉起，标准输入输出收发——本地工具台的最快路径）和 <b>Streamable HTTP</b>（远程挂个 HTTP 端点）。本篇的画境 server 走 stdio：harness 把它当子进程启动，报文从标准输入进、标准输出回，零端口零鉴权，本机工具台就该这么朴素。</p>
+  <div class="fig" style="text-align:center"><img src="assets/mcp-handshake.webp" alt="两台机器人在工具房柜台交换工牌" style="max-width:640px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">FIG. C · 交换工牌：initialize 谈定版本与能力，才准点菜（gpt-image-2.5 生成）</div></div>
 
   <div class="demo" id="d2">
     <div class="demo-head"><span class="demo-tag">互动 02</span><span class="demo-title">握手时序台 · 暗号对上才准点菜</span><span class="demo-hint">逐步发报文 · 看'id'怎么配对</span></div>
