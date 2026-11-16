@@ -219,6 +219,7 @@ table.tbl{width:100%;border-collapse:collapse;background:var(--card);font-size:1
   </table></div>
   <p>传输层只有两种：<b>stdio</b>（server 当子进程拉起，标准输入输出收发——本地工具台的最快路径）和 <b>Streamable HTTP</b>（远程挂个 HTTP 端点）。本篇的画境 server 走 stdio：harness 把它当子进程启动，报文从标准输入进、标准输出回，零端口零鉴权，本机工具台就该这么朴素。</p>
   <div class="fig" style="text-align:center"><img src="assets/mcp-handshake.webp" alt="两台机器人在工具房柜台交换工牌" style="max-width:640px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">FIG. D · 交换工牌：initialize 谈定版本与能力，才准点菜（gpt-image-2.5 生成）</div></div>
+  <div class="fig" style="text-align:center"><img src="assets/handshake-loop.gif" alt="两台机器人来回递工牌的循环动画" loading="lazy" style="max-width:320px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">动图 · 工牌来回递，每次过手都发光——握手就是反复对暗号（gpt-image-2.6-flare · 循环）</div></div>
 
   <div class="demo" id="d2">
     <div class="demo-head"><span class="demo-tag">互动 02</span><span class="demo-title">握手时序台 · 暗号对上才准点菜</span><span class="demo-hint">逐步发报文 · 看'id'怎么配对</span></div>
@@ -254,6 +255,7 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
   <p><b>经典追问：为什么不信任模型老实传参，非要加闸门？</b>因为模型的输出本质是「续写最像的文本」，不是「执行约束的程序」。没有闸门时三类事故高发：①<b>幻觉参数</b>——给并不存在的字段赋值（静默失效）；②<b>越界值</b>——count 写成 17，下游按 17 张计费；③<b>类型漂移</b>——把数字写成字符串，深夜定时任务里炸给运维看。闸门的另一半价值在<b>报错的方向</b>：校验失败时返回「期望整数、收到字符串、字段名 count」的精确消息，模型下一轮就能自己改——闸门不是不信任，是给模型一条能走回来的路。</p>
   <p>范围还有一个隐藏用途：<b>把业务上限写进类型</b>。waitSeconds 的上限 600 不是随手写的——server 端轮询每 2 秒一次、最多等 600 秒（第四章展开），schema 把这条运维事实固化成了类型约束，调用方在点单阶段就知道「等再久也等不过 10 分钟」。</p>
   <div class="fig" style="text-align:center"><img src="assets/ch3-gate.webp" alt="花括号形状的黄铜大锁门，绿勾放行红叉拦下" style="max-width:640px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">FIG. E · 菜单即闸门：合规点单盖绿章放行，越界点单被拦在门外（gpt-image-2.5 生成）</div></div>
+  <div class="fig" style="text-align:center"><img src="assets/gate-loop.gif" alt="花括号锁门开合放行点单的循环动画" loading="lazy" style="max-width:320px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">动图 · 点单递上去，锁「啪」地开一道缝——合规才放行（gpt-image-2.6-flare · 循环）</div></div>
 
   <div class="demo" id="d3">
     <div class="demo-head"><span class="demo-tag">互动 03</span><span class="demo-title">校验器 · 亲手给模型递一张错单</span><span class="demo-hint">三个病例 · 真校验逻辑 · 原样报错</span></div>
@@ -288,6 +290,7 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
 <span class="c">// 真实常量：POLL_INTERVAL_MS=2000 · DEFAULT_WAIT=240s · MAX_WAIT=600s</span>
 <span class="c">// 状态机：queued → running → succeeded / failed（每 2s 轮询一次）</span></pre></div>
   <div class="fig" style="text-align:center"><img src="assets/ch4-ticket.webp" alt="收银机器人递出号码票，传送带四只罩盘排队" style="max-width:640px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">FIG. F · 回票：提交即给号，传送带上每 2 秒报一次灯色（gpt-image-2.5 生成）</div></div>
+  <div class="fig" style="text-align:center"><img src="assets/ticket-loop.gif" alt="传送带四只罩盘状态灯轮流变化的循环动画" loading="lazy" style="max-width:320px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">动图 · 罩盘排队前进，灯色逐个转绿——轮询视角下的长任务（gpt-image-2.6-flare · 循环）</div></div>
   <p><b>经典追问：为什么不干脆把等待上限拉到 30 分钟，一步到位？</b>三个理由。①<b>通道占用</b>——同步等待期间这条调用往返被挂死，MCP 客户端通常有自身超时（标本所在的 harness 一类默认几十秒），拉满只会换来客户端单方面断连，任务照样死。②<b>体验上的可取消</b>——回票模式里调用方每 2 秒能看一眼进度、能决定放弃；挂死 30 分钟等于把选择权没收。③<b>失败半径</b>——等 30 分钟才报错，浪费的是 30 分钟；等 600 秒承认超时，剩余时间交给票去追。长任务设计的原则就一句：<b>让每一段等待都可观测、可放弃、可续查</b>。</p>
 
   <div class="demo" id="d4">
@@ -326,6 +329,7 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
   <p>协议层错误说给<b>代码</b>听（数字码好分流重试）；工具层错误说给<b>模型</b>听（<code>isError: true</code> 加一段人话——注意工具失败<b>不是协议错误</b>，调用本身成功送达了，失败的是业务，这样模型才能像读到一份坏结果那样处理它）；业务层 hint 说给<b>下一步</b>听。三层各司其职，谁也不冒充谁。</p>
   <p><b>经典追问：报错为什么要带上「接下来能做什么」？</b>因为收到错误的模型正站在岔路口：它可以放弃、重试、换参数，或者向用户求援——它选哪条路，取决于错误文本里有没有路标。「system cpu overloaded」是事实陈述，模型只能原样转告用户；「上游过载（CPU 99.7%），约 1–5 分钟后可重试，或换 flare 模型」是<b>事实加岔路</b>，模型会自己挑一条走。本篇写作时就撞了一次真的：GIF 渲染上游返回 CPU 过载 503，机器读到的下一句话就是等几分钟或换型号——错误消息直接变成了工作计划。</p>
   <div class="fig" style="text-align:center"><img src="assets/ch5-signpost.webp" alt="岔路口的橙色路标，机器人拿放大镜思考" style="max-width:640px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">FIG. G · 报错带岔路：路标写明两个方向，模型自己挑一条走（gpt-image-2.5 生成）</div></div>
+  <div class="fig" style="text-align:center"><img src="assets/signpost-loop.gif" alt="岔路路标两侧箭头轮流点亮的循环动画" loading="lazy" style="max-width:320px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">动图 · 两侧箭头轮流亮——每条都写明了「接下来能做什么」（gpt-image-2.6-flare · 循环）</div></div>
   <p>还有一类更隐蔽的错误：<b>连接死而服务还在</b>。标本的 api() 封装里埋着自愈逻辑——请求抛错时先清掉缓存的 baseUrl、重新发现服务地址，<b>再试一次</b>；第二次仍失败才把「无法连接画境服务（地址）」抛出去。断连重试这类机械动作不该劳烦模型决策，能自愈的先自愈，自愈不了再把现场完整交上去。</p>
 
   <div class="demo" id="d5">
