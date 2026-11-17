@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<title>给 Agent 发一套趁手的工具 · 技术栈全景图</title>
+<style>
+@font-face{font-family:"WenKai";src:url("../assets/wenkai-medium.woff2") format("woff2");font-weight:600 900;font-display:swap}
+:root{
+  --bg:#f2f0ea;--surface:#fbfaf6;--ink:#253239;--ink2:#43545e;--muted:#71828c;--faint:#a3b1b8;
+  --line:#d9d7cc;--line2:#e6e4da;--steel:#3e5c6e;--steel-soft:#e2ecf1;--orange:#d96f1f;--orange-soft:#fbe9dc;
+  --green:#3f8f5f;--night:#1d262c;--night-text:#d8e3e8;
+  --mono:ui-monospace,Consolas,monospace;
+}
+*{box-sizing:border-box}html,body{margin:0;padding:0}
+body{width:900px;background:var(--bg);color:var(--ink);font-family:"WenKai","Microsoft YaHei",sans-serif;padding:44px 46px 36px;
+  background-image:linear-gradient(rgba(37,50,57,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(37,50,57,.05) 1px,transparent 1px);background-size:44px 44px}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:2px solid #b3b1a4;padding-bottom:14px}
+.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.22em;color:var(--orange);margin:0 0 9px}
+h1{margin:0;font-size:32px;line-height:1.2;font-weight:800}h1 em{font-style:normal;color:var(--orange)}
+.head .meta{text-align:right;font-family:var(--mono);font-size:9.5px;line-height:1.95;color:var(--muted);white-space:nowrap}
+.dek{margin:14px 0 18px;font-size:13px;line-height:1.8;color:var(--ink2);max-width:780px}
+.sect{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:var(--muted);margin:18px 0 8px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.card{border:1px solid var(--line);border-radius:6px;background:var(--surface);overflow:hidden}
+.card .ch{padding:9px 13px 7px;border-bottom:1px solid var(--line2);font-weight:800;font-size:13.5px}
+.card .ch small{display:block;font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;color:var(--steel);margin-bottom:3px;font-weight:400}
+.card .cb{padding:8px 13px 10px;font-size:11px;line-height:1.75;color:var(--ink2)}
+.card .cb b{color:var(--ink)}
+.card.hl .ch{background:var(--orange-soft);border-top:2px solid var(--orange)}
+.bar{margin:20px 0 0;border-radius:8px;background:var(--night);color:var(--night-text);padding:14px 18px;font-family:var(--mono);font-size:11px;line-height:1.9;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.bar b{color:#e8a45f}
+.foot{margin-top:16px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--faint);display:flex;justify-content:space-between}
+</style>
+</head>
+<body>
+<div class="head">
+  <div><div class="eyebrow">造物手记 VOL.15 · TECH STACK</div>
+  <h1>给 Agent 发一套趁手的工具<em> ·</em> 技术栈全景图</h1></div>
+  <div class="meta">agent-toolkit · MCP 工具层解剖<br/>6 章 · 6 互动 · 零依赖<br/>2026.11 · StarrySea1412</div>
+</div>
+<div class="dek">解剖一台 653 行的自研 MCP server：13 个工具怎么注册、schema 怎么当闸门、长任务怎么回票、错误怎么说成人话——每条都对到源码。</div>
+<div class="sect">01 · <b>解剖标本</b> 画境 server</div>
+<div class="cards">
+  <div class="card hl"><div class="ch">MCP 协议层<small>JSON-RPC 2.0</small></div><div class="cb"><b>initialize 三步握手</b> → tools/list 拉菜单 → tools/call 点单；id 配对防串线</div></div>
+  <div class="card"><div class="ch">schema 闸门<small>zod</small></div><div class="cb">prompt 1–12000 / count 1–4 / waitSeconds 5–600，<b>业务上限写进类型</b></div></div>
+  <div class="card"><div class="ch">任务队列<small>收银台模式</small></div><div class="cb">wait=false 提交即回票，hint 印在票上；<b>2s 轮询 · 600s 上限</b>如实超时</div></div>
+</div>
+<div class="sect">02 · <b>文章与小样</b> 六章六台</div>
+<div class="cards">
+  <div class="card"><div class="ch">章节骨架<small>CONTENTS</small></div><div class="cb">工具是什么 → MCP → schema → 长任务 → 错误 → 粒度，<b>经典追问每章一枚</b></div></div>
+  <div class="card"><div class="ch">六台小样<small>确定性</small></div><div class="cb">点单台 / 握手时序台 / 校验器 / 队列台 / 错误对照台 / 粒度对比台，<b>全部可重放</b></div></div>
+  <div class="card"><div class="ch">真实事故<small>现场</small></div><div class="cb">写作当晚 GIF 上游 <b>CPU 过载 503</b>——错误消息自带岔路，直接变成工作计划</div></div>
+</div>
+<div class="sect">03 · <b>插图与发布</b> 三媒体产线</div>
+<div class="bar">
+  <span>插图 <b>5 WebP + 5 GIF</b>（gpt-image-2.5 / 2.6-flare，GIF 按 GIF8 魔数验收）</span>
+  <span>发布：Pages + <b>diff=0 验收</b></span>
+</div>
+<div class="foot"><span>标本 ai-image-studio · 653 行 13 工具 · 只读解剖</span><span>starrysea1412.github.io/agent-toolkit</span></div>
+</body>
+</html>
