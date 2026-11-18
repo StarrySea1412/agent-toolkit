@@ -164,6 +164,7 @@ table.tbl{width:100%;border-collapse:collapse;background:var(--card);font-size:1
   <h3><span class="h3n">⚓ 1.1</span>一次调用的完整链条</h3>
   <p>把模型想象成餐厅里只看得见菜单的食客。运行时先把<b>工具清单</b>（名称 + 一句描述 + 参数说明）连同用户问题一起端进上下文；模型读完，吐出点单：<code>{"tool": "generate_image", "arguments": {"prompt": "一只戴工程师帽的柴犬", "count": 2}}</code>——注意它<b>只是文本</b>，模型没有执行任何东西。运行时代码解析这段 JSON，做参数校验，执行真正的函数（发 HTTP、读文件、起任务），把结果序列化成文本<b>回填到对话里</b>，再请模型看一眼结果、继续回答。一个完整的「调用」= 点单 → 端菜 → 回填 → 续答，四步缺一不可。</p>
   <p><b>经典追问：模型真的在「调用」工具吗？</b>不是，而且承认这一点很重要。三个证据：①模型侧的输出永远是纯文本 JSON——没有跳转、没有副作用；②真正执行发生在模型之外的普通代码里，出错、限速、计费都在那层；③模型对执行结果一无所知，直到结果作为新消息回填——所以「回填失败」这种事故模型根本感知不到，只会自顾自地继续编。理解了这一层，后面所有设计（schema、排队、报错）都变得显然：<b>它们全是在给这段「文本协议」补上模型天生没有的东西</b>——约束、耐心和记忆。</p>
+<p>承认「模型只会点单」还有一个工程后果：点单是纸面上的文本，任何一层都能伪造或改写它——所以关键校验从不信任纸面，全长在<b>端菜那一侧</b>（第三章的闸门、第四章的 CAS）。签名不在纸上，在后厨。</p>
 
   <h3><span class="h3n">⚓ 1.2</span>菜单本身就是工程品</h3>
   <p>工具清单不是随手一列的注释，它<b>每次对话都常驻上下文</b>。本篇解剖的这台 server 注册了 13 个工具，光工具描述就有约 1600 字——每次对话开始，这些字都先占掉一片窗口（第六章细算这笔账）。描述写得含糊，模型就点错菜：把「生成视频」的活派给「生成图片」，或者自作主张补一个没给的参数。所以工具描述是面向<b>模型</b>的界面文档——写给一个读得极认真、但毫无常识的字面主义者。</p>
@@ -198,7 +199,15 @@ table.tbl{width:100%;border-collapse:collapse;background:var(--card);font-size:1
     <div class="demo-foot">确定性模拟：四步 = 塞菜单+提问 → 模型吐点单 JSON → 运行时校验执行 → 结果回填模型续答。「忘了回填」分支演示 1.1 说的第三条证据——模型对执行一无所知，没回填它就会把上一轮的点单再吐一遍。</div>
   </div>
 </section>
-<div class="meridian"><span>· 第一章 完 ·</span></div>
+<div class="meridian"><span><h3><span class="h3n">⚓ 1.3</span>点单的语法解剖</h3>
+<div class="term">
+<div class="term-head"><span class="d d1"></span><span class="d d2"></span><span class="d d3"></span><span class="tt">一张点单 · 原样</span></div>
+<pre>{ <span class="s">"tool"</span>: <span class="s">"generate_image"</span>,
+  <span class="s">"arguments"</span>: { <span class="s">"prompt"</span>: <span class="s">"一只戴工程师帽的柴犬"</span>, <span class="s">"count"</span>: 2 } }</pre>
+</div>
+<p>三个语法决定都值得停一秒：①<b>单数 tool 名</b>——模型只报名字不报路径，路由是运行时的事；②<b>arguments 是扁平字典</b>——模型擅长续写结构化文本，但嵌套每深一层、引号与括号的错率就翻一截，菜单把参数拍平在第一层；③<b>没有回调、没有应答约定</b>——回答走原对话回填，模型从头到尾不需要「接收」这个概念。四步链条里模型只占两头（读与吐），中间两步——校验与执行——它连知道都不需要知道。</p>
+
+· 第一章 完 ·</span></div>
 <section class="chapter" id="ch2">
   <div class="ch-head"><span class="ch-no">02 · 第二章</span><h2>MCP：一台通用工具台的协议</h2></div>
   <p class="ch-lead">在 MCP 之前，工具接入是一笔 M×N 的糊涂账：M 个客户端（Claude、Cursor、你自己写的 harness）× N 个工具商（生图、检索、数据库……），每对组合都要手写一份胶水。MCP（Model Context Protocol，2024 年 11 月开源）把这笔账压缩成 <b>M+N</b>：工具商只管实现一次 server，客户端只管实现一次接入，剩下的握手、列清单、调用，全部走同一份协议。</p>
@@ -206,6 +215,7 @@ table.tbl{width:100%;border-collapse:collapse;background:var(--card);font-size:1
   <h3><span class="h3n">⚓ 2.1</span>协议的地基：JSON-RPC 2.0</h3>
   <p>MCP 的数据层就是 <b>JSON-RPC 2.0</b>——一种 2009 年定稿的老协议，全部消息只有四种：<b>请求</b>（带 <code>id</code>，要回话）、<b>响应</b>（带同号 <code>id</code>，回答请求）、<b>错误</b>（带同号 <code>id</code> + code/message）、<b>通知</b>（不带 <code>id</code>，说完就走）。<code>id</code> 配对是整台协议的骨架：你发出去的第 3 号请求，回话一定也标着 3 号——并发多条调用也不会串线。本篇 server 的名字在握手报文里就写作 <code>{"name": "ai-image-studio", "version": "0.1.0"}</code>。</p>
   <p><b>经典追问：为什么不用 REST，非要 JSON-RPC？</b>REST 面向资源（GET /images/42），而工具调用面向<b>动作</b>（「执行 inspect_image，参数 mode=position」）——动作没有天然的 URL，硬造资源路由只会产生一堆动词端点。JSON-RPC 把「方法名 + 参数 + id」三件事压进一个信封，单连接双向走，通知类消息（如进度上报）不需要应答也不占 id——工具台这种「一声令下多个动作」的场景，它比 REST 贴身。</p>
+<p>id 配对的价值要到并发时才显形：三条 tools/call 同时在飞，响应按 id 归位不串线；而通知不占 id，恰好因为它们「不需要回话」——一条连接同时当传令兵与报告线，靠的就是这点分寸。</p>
 
   <h3><span class="h3n">⚓ 2.2</span>握手：先对暗号，再点菜</h3>
   <p>连接建立后，<b>客户端必须先发 <code>initialize</code></b>：带着自己支持的协议版本号和自身能力清单（我支持工具、我支持采样……）。server 回应它支持的版本与能力，两边就高不就低地锁定一个版本——谈不拢就直接断连，绝无含糊。客户端随后发一条 <code>notifications/initialized</code> 通知表示「暗号对上了」，之后才能 <code>tools/list</code> 拉菜单、<code>tools/call</code> 下单。这条三步握手挡住了两类事故：版本不一致的「鸡同鸭讲」，和客户端一上来就调用工具的「没登记先点菜」。</p>
@@ -240,7 +250,10 @@ table.tbl{width:100%;border-collapse:collapse;background:var(--card);font-size:1
     <div class="demo-foot">确定性模拟：报文为 JSON-RPC 2.0 原样结构，id 逐条配对。「跳过握手」分支复现没登记先点菜的下场——server 直接回 -32002 类错误断连，菜单都没得拉。版本日期线核对官方 spec。</div>
   </div>
 </section>
-<div class="meridian"><span>· 第二章 完 ·</span></div>
+<div class="meridian"><span><h3><span class="h3n">⚓ 2.3</span>版本线上的四次让步</h3>
+<p>把版本表按「为什么改」重读一遍，每一条都是向真实部署让步：2024-11-05 首版自带 stdio——本地优先，子进程拉起是最快路径，先让工具台跑起来；2025-03-26 Streamable HTTP 顶替 HTTP+SSE——远程部署成为常态需求，而 SSE 的单向性让会话态难管；2025-11-25 生命周期细化、握手与关停行为收紧——<b>用得多了才有资格长规矩</b>；2026-07-28 核心走向无状态，会话态从协议层剥离——HTTP 部署从此可以水平扩展。回头看第三、四章的设计会发现它们在同一场运动里：<b>schema 把约束从「会话」搬进「消息」，票根把进度从「连接」搬进「返回值」</b>——协议在变轻，状态在下沉。</p>
+
+· 第二章 完 ·</span></div>
 <section class="chapter" id="ch3">
   <div class="ch-head"><span class="ch-no">03 · 第三章</span><h2>schema：菜单即闸门</h2></div>
   <p class="ch-lead">模型点单不保证老实——它会补你没写的参数、漏掉必填项、把「1 到 4 张」写成 17。schema（JSON Schema）是工具台上唯一的闸门：参数类型、范围、必填、默认值，全在这里声明。<b>闸门越清楚，模型越少越界</b>——它读得极认真，只是没常识。</p>
@@ -254,6 +267,7 @@ count:         z.number().int().min(1).max(4).optional().describe('生成张数 
 wait:          z.boolean().default(true).describe('是否等待生成完成，默认 true')
 waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等待秒数，默认 240')</pre></div>
   <p><b>经典追问：为什么不信任模型老实传参，非要加闸门？</b>因为模型的输出本质是「续写最像的文本」，不是「执行约束的程序」。没有闸门时三类事故高发：①<b>幻觉参数</b>——给并不存在的字段赋值（静默失效）；②<b>越界值</b>——count 写成 17，下游按 17 张计费；③<b>类型漂移</b>——把数字写成字符串，深夜定时任务里炸给运维看。闸门的另一半价值在<b>报错的方向</b>：校验失败时返回「期望整数、收到字符串、字段名 count」的精确消息，模型下一轮就能自己改——闸门不是不信任，是给模型一条能走回来的路。</p>
+<p>闸门的另一半价值在<b>报错的方向</b>：「期望整数、收到字符串、字段名 count」三要素，让模型的下一轮变成改单而不是重试——重试解决不了类型错，只有改单能。</p>
   <p>范围还有一个隐藏用途：<b>把业务上限写进类型</b>。waitSeconds 的上限 600 不是随手写的——server 端轮询每 2 秒一次、最多等 600 秒（第四章展开），schema 把这条运维事实固化成了类型约束，调用方在点单阶段就知道「等再久也等不过 10 分钟」。</p>
   <div class="fig" style="text-align:center"><img src="assets/ch3-gate.webp" alt="花括号形状的黄铜大锁门，绿勾放行红叉拦下" style="max-width:640px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">FIG. E · 菜单即闸门：合规点单盖绿章放行，越界点单被拦在门外（gpt-image-2.5 生成）</div></div>
   <div class="fig" style="text-align:center"><img src="assets/gate-loop.gif" alt="花括号锁门开合放行点单的循环动画" loading="lazy" style="max-width:320px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">动图 · 点单递上去，锁「啪」地开一道缝——合规才放行（gpt-image-2.6-flare · 循环）</div></div>
@@ -277,7 +291,17 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
     <div class="demo-foot">确定性模拟：校验逻辑与标本 zod 规则一致（prompt 1-12000、count 整数 1-4、waitSeconds 5-600）。注意三种病例的报错都包含「字段名 + 期望 + 实际」三要素——这是模型下一轮能自己改单的前提。</div>
   </div>
 </section>
-<div class="meridian"><span>· 第三章 完 ·</span></div>
+<div class="meridian"><span><h3><span class="h3n">⚓ 3.2</span>describe 的写作学</h3>
+<p>把三条 describe 原样并排放着看（zod 声明里写给模型读的字段说明）：</p>
+<div class="tbl-wrap"><table class="tbl">
+<tr><th>字段</th><th>describe 原文</th><th>写作律</th></tr>
+<tr><td class="k">prompt</td><td>「画面描述（正向提示词）」</td><td>说清用途与必填</td></tr>
+<tr><td class="k">providerId</td><td>「渠道 ID；不传则自动选第一个启用了生图模型的渠道」</td><td>把「不传会怎样」写明白</td></tr>
+<tr><td class="k">waitSeconds</td><td>「最长等待秒数，默认 240」</td><td>默认值写进文字，不让模型猜</td></tr>
+</table></div>
+<p>三条律合起来就是「菜单的写作学」：每条说明交代<b>用不用我、不传会怎样、缺省是什么</b>。13 个工具的描述合计约 1,600 字，平均每工具百来字——恰好一屏（第六章的账）。而范围从来不只是范围：waitSeconds 的 600 上限是第四章轮询上限的类型化——<b>把运维事实固化成类型约束，调用方在点单阶段就知道天花板在哪</b>。</p>
+
+· 第三章 完 ·</span></div>
 <section class="chapter" id="ch4">
   <div class="ch-head"><span class="ch-no">04 · 第四章</span><h2>长任务：收银台不让你干等</h2></div>
   <p class="ch-lead">生图 30 到 90 秒、视频几分钟——工具台不能让调用方把消息通道挂死在「干等」上。标本的答案是收银台模式：<b>下单立刻回票</b>（任务 ID + <code>wait=false</code>），票上印着下一步去哪查（<code>hint: 用 get_generation 查询进度</code>）；要等的话也可以等，但最多等 600 秒，超时照样回票让你稍后再查。</p>
@@ -293,6 +317,7 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
   <div class="fig" style="text-align:center"><img src="assets/ch4-ticket.webp" alt="收银机器人递出号码票，传送带四只罩盘排队" style="max-width:640px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">FIG. F · 回票：提交即给号，传送带上每 2 秒报一次灯色（gpt-image-2.5 生成）</div></div>
   <div class="fig" style="text-align:center"><img src="assets/ticket-loop.gif" alt="传送带四只罩盘状态灯轮流变化的循环动画" loading="lazy" style="max-width:320px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">动图 · 罩盘排队前进，灯色逐个转绿——轮询视角下的长任务（gpt-image-2.6-flare · 循环）</div></div>
   <p><b>经典追问：为什么不干脆把等待上限拉到 30 分钟，一步到位？</b>三个理由。①<b>通道占用</b>——同步等待期间这条调用往返被挂死，MCP 客户端通常有自身超时（标本所在的 harness 一类默认几十秒），拉满只会换来客户端单方面断连，任务照样死。②<b>体验上的可取消</b>——回票模式里调用方每 2 秒能看一眼进度、能决定放弃；挂死 30 分钟等于把选择权没收。③<b>失败半径</b>——等 30 分钟才报错，浪费的是 30 分钟；等 600 秒承认超时，剩余时间交给票去追。长任务设计的原则就一句：<b>让每一段等待都可观测、可放弃、可续查</b>。</p>
+<p>票根上印的是 hint 而不是进度条，因为模型不能点进度条——它能调用的只有工具名。<b>路标必须长成「下一个工具调用」的形状</b>， 不然再精确的进度也只是风景。</p>
 
   <div class="demo" id="d4">
     <div class="demo-head"><span class="demo-tag">互动 04</span><span class="demo-title">队列台 · 提交四张，看状态机走完</span><span class="demo-hint">同步/异步两模式 · 带超时分支</span></div>
@@ -313,7 +338,10 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
     <div class="demo-foot">确定性模拟：状态机与真实常量一致（轮询 2s 一步、同步模式最多等 300s 模拟刻度后 timedOut）。点同步等之后别走开——看它怎么在 600s 上限内如实认输并递票。</div>
   </div>
 </section>
-<div class="meridian"><span>· 第四章 完 ·</span></div>
+<div class="meridian"><span><h3><span class="h3n">⚓ 4.2</span>600 秒的另一半：节拍的成本账</h3>
+<p>三个真实常量并排放着看（server 源码）：POLL_INTERVAL_MS = 2000、DEFAULT_WAIT = 240、MAX_WAIT = 600。600 秒的上限不是拍脑袋——它同时压着两个对手：①<b>MCP 客户端自己的调用超时</b>，挂死等待等于客户端单方面断连，任务照样死（互动 04 的「认输递票」分支验的就是这条路）；②<b>轮询的查询成本</b>——2 秒一跳，600 秒就是 300 次真实的库查询；把节拍压到 0.5 秒就是 1,200 次。<b>节拍是成本与新鲜度的折中</b>，不是越快越好。而 240 秒的默认值给「30–90 秒的常规生图」留足余量，把 600 只留给视频这类重活——默认与上限之间，藏着一条业务优先级。</p>
+
+· 第四章 完 ·</span></div>
 <section class="chapter" id="ch5">
   <div class="ch-head"><span class="ch-no">05 · 第五章</span><h2>错误：把失败说成人话</h2></div>
   <p class="ch-lead">工具一定会失败：配额用完、上游过载、连接断掉。失败的可怕之处从来不是失败本身，而是<b>失败传回来时是一段没人读得懂的东西</b>。标本在错误上花了三层心思，每一层都有明确职责。</p>
@@ -329,6 +357,7 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
   </table></div>
   <p>协议层错误说给<b>代码</b>听（数字码好分流重试）；工具层错误说给<b>模型</b>听（<code>isError: true</code> 加一段人话——注意工具失败<b>不是协议错误</b>，调用本身成功送达了，失败的是业务，这样模型才能像读到一份坏结果那样处理它）；业务层 hint 说给<b>下一步</b>听。三层各司其职，谁也不冒充谁。</p>
   <p><b>经典追问：报错为什么要带上「接下来能做什么」？</b>因为收到错误的模型正站在岔路口：它可以放弃、重试、换参数，或者向用户求援——它选哪条路，取决于错误文本里有没有路标。「system cpu overloaded」是事实陈述，模型只能原样转告用户；「上游过载（CPU 99.7%），约 1–5 分钟后可重试，或换 flare 模型」是<b>事实加岔路</b>，模型会自己挑一条走。本篇写作时就撞了一次真的：GIF 渲染上游返回 CPU 过载 503，机器读到的下一句话就是等几分钟或换型号——错误消息直接变成了工作计划。</p>
+<p>三层账本有个朴素的检验法：把一条报错给三种读者各念一遍——代码找得到错误码、模型读得懂人话、人看得到岔路。<b>哪一层读不懂，就是哪一层写坏了</b>。</p>
   <div class="fig" style="text-align:center"><img src="assets/ch5-signpost.webp" alt="岔路口的橙色路标，机器人拿放大镜思考" style="max-width:640px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">FIG. G · 报错带岔路：路标写明两个方向，模型自己挑一条走（gpt-image-2.5 生成）</div></div>
   <div class="fig" style="text-align:center"><img src="assets/signpost-loop.gif" alt="岔路路标两侧箭头轮流点亮的循环动画" loading="lazy" style="max-width:320px;width:100%;border-radius:10px;display:block;margin:0 auto"><div class="fig-cap">动图 · 两侧箭头轮流亮——每条都写明了「接下来能做什么」（gpt-image-2.6-flare · 循环）</div></div>
   <p>还有一类更隐蔽的错误：<b>连接死而服务还在</b>。标本的 api() 封装里埋着自愈逻辑——请求抛错时先清掉缓存的 baseUrl、重新发现服务地址，<b>再试一次</b>；第二次仍失败才把「无法连接画境服务（地址）」抛出去。断连重试这类机械动作不该劳烦模型决策，能自愈的先自愈，自愈不了再把现场完整交上去。</p>
@@ -352,7 +381,10 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
     <div class="demo-foot">确定性模拟：三种失败对应三层账本。注意工具层失败返回的 isError:true ——调用链路本身是通的，失败的是业务；模型把它当一份「坏结果」读，而不是当「打不通」处理。</div>
   </div>
 </section>
-<div class="meridian"><span>· 第五章 完 ·</span></div>
+<div class="meridian"><span><h3><span class="h3n">⚓ 5.2</span>自愈的两跳：机械故障机械医</h3>
+<p>还有一类故障最隐蔽：<b>连接死了，服务还在</b>。标本在 api() 封装里埋了自愈逻辑——第一跳失败，先清掉缓存的 baseUrl、重新发现服务地址，<b>再试一次</b>；第二跳仍失败，才把「无法连接画境服务（地址）」抛出去。设计立场与三层账本一脉相承：<b>机械故障机械医，别劳烦模型决策</b>。断连重试这种动作不需要智能——能自愈的先自愈，自愈不了再把现场完整交上去，让上一层的智能花在值得的地方。</p>
+
+· 第五章 完 ·</span></div>
 <section class="chapter" id="ch6">
   <div class="ch-head"><span class="ch-no">06 · 第六章</span><h2>粒度：一个工具管几件事</h2></div>
   <p class="ch-lead">工具清单<b>每次对话都常驻上下文</b>——这是设计工具台时最容易被忽略的一笔账。标本的 13 个工具描述合计约 1600 字，意味着每场对话开场先付这笔固定税。于是出现第六章的核心取舍：一件有三种子模式的事，做成<b>一个大工具带 mode 参数</b>，还是<b>三个小工具</b>？</p>
@@ -389,8 +421,12 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
     <div class="demo-foot">确定性模拟：任务→选单为固定映射（同 16 篇文章实测口径）。两跳 = 模型先选工具再想 mode 的额外决策步；三合一赢在菜单账，拆开赢在选单跳数——没有全胜答案，只有与场景匹配的取舍。</div>
   </div>
   <div class="note"><b>一条可以抄的设计检查单：</b>①每个工具的 describe 里有没有「什么时候用我、什么时候不用我」？②参数范围是否把业务上限写进类型？③失败会不会带 hint 回来？④长任务是否提交加轮询、票上有没有路标？⑤菜单总字数还在一屏内吗？——标本 653 行，这五问全部有答案。</div>
+<p>检查单第五问「菜单总字数还在一屏内吗」是最防不住的一个——工具会一个一个加进来，字数是慢性的。<b>季度性复查比一次性设计更重要</b>：胖菜单从来不是一顿吃成的。</p>
 </section>
-<div class="meridian"><span>· 第六章 完 ·</span></div>
+<div class="meridian"><span><h3><span class="h3n">⚓ 6.2</span>13 个工具的三班岗</h3>
+<p>粒度的最后一笔是排班：标本把 13 个工具分三班——<b>查询班</b>（list_providers、list_models、list_gif_styles、search_library、random_prompts、get_generation、get_video、inspect_image、analyze_gif）负责看，<b>执行班</b>（generate_image、generate_video、assemble_gif）负责动手，<b>辅助班</b>（polish_prompt）负责润色。更见心思的是描述里彼此点名：generate 的说明指向 list_providers（「生图前用它确认 providerId」），两张票根都指向 get_generation——<b>菜单不只是清单，是一张画了路径的地图</b>：模型按图索骥，就不必把调用顺序背进直觉。</p>
+
+· 第六章 完 ·</span></div>
 <section class="chapter" id="cheat">
   <div class="ch-head"><span class="ch-no">附录</span><h2>速查卡：如果只带走十二句</h2></div>
   <p class="ch-lead">贴在手边的那一页。每句都是前面六章的浓缩，展开版见各章。</p>
@@ -414,6 +450,8 @@ waitSeconds:   z.number().int().min(5).max(600).optional().describe('最长等�
   <span class="beacon">· 完 ·</span>
   <h2>收尾：菜单、闸门、票根</h2>
   <p>工具台设计的全部心思可以压成三件实物：<b>一份菜单</b>（describe + schema，写给一个读得极认真的字面主义者）、<b>一道闸门</b>（校验失败时给出能走回来的路）、<b>一张票根</b>（长任务回票，hint 印在票上）。至于模型——它只负责点单和读信，手长在运行时身上。</p>
+<p>最后把 653 行按一次调用的时序串一遍：握手对暗号（initialize）→ 菜单随对话常驻（tools/list）→ 模型吐点单（tools/call）→ schema 闸门验单 → 收银台回票（submitted / timedOut 加 hint）→ 轮询到终态（2 秒一跳、600 秒封顶）→ 结果回填、模型续答。六步里模型只占两头，<b>中间四步全是运行时的手艺</b>——所谓「给 Agent 发工具」，发的从来不是手，是一套让模型能放心点单的餐厅。</p>
+
   <p>这篇的标本是本机一台 653 行的画境 server：13 个工具、zod 菜单、2 秒轮询、600 秒上限、hint 链、断连自愈重试——每一条都对到源码原样。写作当晚它的 GIF 上游真的返回了一次 CPU 过载 503，而那条错误消息自带「等几分钟或换型号」的岔路——第五章的每一个字都是刚发生的事。工具台安好了，剩下的，是把活派给它。</p>
 </section>
 </main>
